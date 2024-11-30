@@ -9,8 +9,6 @@ load_dotenv()
 
 def download_playlist(url):
     print("Environment variables:")
-    print("USERNAME:", os.getenv("USERNAME"))
-    print("PASSWORD:", os.getenv("PASSWORD"))
     print("SONG_ARCHIVE:", os.getenv("SONG_ARCHIVE"))
     print("ROOT_PATH:", os.getenv("ROOT_PATH"))
     print("DOWNLOAD_FORMAT:", os.getenv("DOWNLOAD_FORMAT"))
@@ -18,7 +16,7 @@ def download_playlist(url):
     print("PLAYLISTS:", os.getenv("PLAYLISTS"))
     
     # zotify command (username, password, song archive path, root path, download format, download quality, print downloads, download lyrics, url)
-    command = ["zotify", "--username", os.getenv("USERNAME"), "--password", os.getenv("PASSWORD"), "--song-archive", os.getenv("SONG_ARCHIVE"), "--root-path", os.getenv("ROOT_PATH"), "--download-format", os.getenv("DOWNLOAD_FORMAT"), "--download-quality", os.getenv("DOWNLOAD_QUALITY"), "--print-downloads", "True", "--download-lyrics", "False", url]
+    command = ["zotify", "--credentials-location", os.getenv("CREDENTIAL_LOCATION"), "--song-archive", os.getenv("SONG_ARCHIVE"), "--root-path", os.getenv("ROOT_PATH"), "--download-format", os.getenv("DOWNLOAD_FORMAT"), "--download-quality", os.getenv("DOWNLOAD_QUALITY"), "--print-downloads", "True", "--download-lyrics", "False", url]
 
     # start the subprocess
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -73,11 +71,13 @@ def download_and_create_playlists():
     # create playlists in the music folder
     create_playlists(os.getenv("ROOT_PATH"))
     
-download_and_create_playlists()
 
-schedule.every().day.at("01:00").do(download_and_create_playlists)
-
-while True:
-    schedule.run_pending()
-    time.sleep(60)
+if __name__ == "__main__":
+    print("Starting the zotify script")
+    download_and_create_playlists()
     
+    schedule.every().day.at("01:00").do(download_and_create_playlists)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(60)

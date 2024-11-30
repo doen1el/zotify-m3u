@@ -31,6 +31,9 @@ RUN mv /usr/local/lib/python3.9/site-packages/lib/python3.9/site-packages/* /usr
 COPY zotify /app/zotify
 COPY main.py /app
 
+# Kopieren der credentials.json Datei
+COPY credentials.json /app/credentials.json
+
 # Festlegen des Arbeitsverzeichnisses
 WORKDIR /app
 
