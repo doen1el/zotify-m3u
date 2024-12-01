@@ -2,7 +2,6 @@ import subprocess
 import os
 from dotenv import load_dotenv
 from datetime import datetime
-import schedule
 import time
 
 load_dotenv()
@@ -16,7 +15,7 @@ def download_playlist(url):
     print("PLAYLISTS:", os.getenv("PLAYLISTS"))
     
     # zotify command (username, password, song archive path, root path, download format, download quality, print downloads, download lyrics, url)
-    command = ["zotify", "--credentials-location", os.getenv("CREDENTIAL_LOCATION"), "--song-archive", os.getenv("SONG_ARCHIVE"), "--root-path", os.getenv("ROOT_PATH"), "--download-format", os.getenv("DOWNLOAD_FORMAT"), "--download-quality", os.getenv("DOWNLOAD_QUALITY"), "--print-downloads", "True", "--download-lyrics", "False", url]
+    command = ["zotify", url, "--song-archive", os.getenv("SONG_ARCHIVE"), "--root-path", os.getenv("ROOT_PATH"), "--download-format", os.getenv("DOWNLOAD_FORMAT"), "--download-quality", os.getenv("DOWNLOAD_QUALITY"), "--skip-previously-downloaded", "True"]
 
     # start the subprocess
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -71,13 +70,31 @@ def download_and_create_playlists():
     # create playlists in the music folder
     create_playlists(os.getenv("ROOT_PATH"))
     
+def loginToSpotify():
+    # zotify login (username, password)
+    print(os.getenv("CREDENTIAL_LOCATION"))
+    command = ["zotify", "--credentials", os.getenv("CREDENTIAL_LOCATION"), "-p"]
+
+    # start the subprocess
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    # wait until the process is finished and fetch the output
+    stdout, stderr = process.communicate()
+    
+    print("OUTPUT: ", stdout)
+    print("ERROR: ", stderr)
+
+    # check if the subprocess was successfull
+    if process.returncode != 0:
+        print(f"Error while logging in: {stderr.decode()}")
+    else:
+        print(f"Logged in successfuly: {stdout.decode()}")
+    
 
 if __name__ == "__main__":
+    # print("Starting the zotify login script")
+    # loginToSpotify()
+    # print("Waiting for 60 seconds")
+    # time.sleep(60)
     print("Starting the zotify script")
     download_and_create_playlists()
-    
-    schedule.every().day.at("01:00").do(download_and_create_playlists)
-
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
