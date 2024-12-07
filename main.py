@@ -15,7 +15,7 @@ def download_playlist(url):
     print("PLAYLISTS:", os.getenv("PLAYLISTS"))
     
     # zotify command (username, password, song archive path, root path, download format, download quality, print downloads, download lyrics, url)
-    command = ["zotify", url, "--song-archive", os.getenv("SONG_ARCHIVE"), "--root-path", os.getenv("ROOT_PATH"), "--download-format", os.getenv("DOWNLOAD_FORMAT"), "--download-quality", os.getenv("DOWNLOAD_QUALITY"), "--skip-previously-downloaded", "True"]
+    command = ["zotify", url, "--archive", os.getenv("SONG_ARCHIVE"), "--library", os.getenv("ROOT_PATH"), "--audio-format", os.getenv("DOWNLOAD_FORMAT"), "--download-quality", os.getenv("DOWNLOAD_QUALITY"), "--skip-previous"]
 
     # start the subprocess
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

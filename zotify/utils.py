@@ -1,284 +1,198 @@
-import datetime
-import math
-import os
-import platform
-import re
-import subprocess
-from enum import Enum
-from pathlib import Path, PurePath
-from typing import List, Tuple
+from argparse import Action, ArgumentError
+from enum import Enum, IntEnum
+from pathlib import Path
+from re import IGNORECASE, sub
+from typing import Any, NamedTuple
 
-import music_tag
-import requests
+from librespot.audio.decoders import AudioQuality
+from librespot.util import Base62
 
-from zotify.const import ARTIST, GENRE, TRACKTITLE, ALBUM, YEAR, DISCNUMBER, TRACKNUMBER, ARTWORK, \
-    WINDOWS_SYSTEM, ALBUMARTIST
-from zotify.zotify import Zotify
+BASE62 = Base62.create_instance_with_inverted_character_set()
 
 
-class MusicFormat(str, Enum):
-    MP3 = 'mp3',
-    OGG = 'ogg',
+class AudioCodec(NamedTuple):
+    name: str
+    ext: str
 
 
-def create_download_directory(download_path: str) -> None:
-    """ Create directory and add a hidden file with song ids """
-    Path(download_path).mkdir(parents=True, exist_ok=True)
+class AudioFormat(Enum):
+    AAC = AudioCodec("aac", "m4a")
+    FDK_AAC = AudioCodec("fdk_aac", "m4a")
+    FLAC = AudioCodec("flac", "flac")
+    MP3 = AudioCodec("mp3", "mp3")
+    OPUS = AudioCodec("opus", "ogg")
+    VORBIS = AudioCodec("vorbis", "ogg")
+    WAV = AudioCodec("wav", "wav")
+    WAVPACK = AudioCodec("wavpack", "wv")
 
-    # add hidden file with song ids
-    hidden_file_path = PurePath(download_path).joinpath('.song_ids')
-    if not Path(hidden_file_path).is_file():
-        with open(hidden_file_path, 'w', encoding='utf-8') as f:
-            pass
+    def __str__(self):
+        return self.name.lower()
 
+    def __repr__(self):
+        return str(self)
 
-def get_previously_downloaded() -> List[str]:
-    """ Returns list of all time downloaded songs """
-
-    ids = []
-    archive_path = Zotify.CONFIG.get_song_archive()
-
-    if Path(archive_path).exists():
-        with open(archive_path, 'r', encoding='utf-8') as f:
-            ids = [line.strip().split('\t')[0] for line in f.readlines()]
-
-    return ids
-
-
-def add_to_archive(song_id: str, filename: str, author_name: str, song_name: str) -> None:
-    """ Adds song id to all time installed songs archive """
-
-    archive_path = Zotify.CONFIG.get_song_archive()
-
-    if Path(archive_path).exists():
-        with open(archive_path, 'a', encoding='utf-8') as file:
-            file.write(f'{song_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{song_name}\t{filename}\n')
-    else:
-        with open(archive_path, 'w', encoding='utf-8') as file:
-            file.write(f'{song_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{song_name}\t{filename}\n')
+    @staticmethod
+    def from_string(s):
+        try:
+            return AudioFormat[s.upper()]
+        except Exception:
+            return s
 
 
-def get_directory_song_ids(download_path: str) -> List[str]:
-    """ Gets song ids of songs in directory """
+class Quality(Enum):
+    NORMAL = AudioQuality.NORMAL  # ~96kbps
+    HIGH = AudioQuality.HIGH  # ~160kbps
+    VERY_HIGH = AudioQuality.VERY_HIGH  # ~320kbps
+    AUTO = None  # Highest quality available for account
 
-    song_ids = []
+    def __str__(self):
+        return self.name.lower()
 
-    hidden_file_path = PurePath(download_path).joinpath('.song_ids')
-    if Path(hidden_file_path).is_file():
-        with open(hidden_file_path, 'r', encoding='utf-8') as file:
-            song_ids.extend([line.strip().split('\t')[0] for line in file.readlines()])
+    def __repr__(self):
+        return str(self)
 
-    return song_ids
-
-
-def add_to_directory_song_ids(download_path: str, song_id: str, filename: str, author_name: str, song_name: str) -> None:
-    """ Appends song_id to .song_ids file in directory """
-
-    hidden_file_path = PurePath(download_path).joinpath('.song_ids')
-    # not checking if file exists because we need an exception
-    # to be raised if something is wrong
-    with open(hidden_file_path, 'a', encoding='utf-8') as file:
-        file.write(f'{song_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{song_name}\t{filename}\n')
+    @staticmethod
+    def from_string(s):
+        try:
+            return Quality[s.upper()]
+        except Exception:
+            return s
 
 
-def get_downloaded_song_duration(filename: str) -> float:
-    """ Returns the downloaded file's duration in seconds """
+class ImageSize(IntEnum):
+    SMALL = 0  # 64px
+    MEDIUM = 1  # 300px
+    LARGE = 2  # 640px
 
-    command = ['ffprobe', '-show_entries', 'format=duration', '-i', f'{filename}']
-    output = subprocess.run(command, capture_output=True)
+    def __str__(self):
+        return self.name.lower()
 
-    duration = re.search(r'[\D]=([\d\.]*)', str(output.stdout)).groups()[0]
-    duration = float(duration)
+    def __repr__(self):
+        return str(self)
 
-    return duration
-
-
-def split_input(selection) -> List[str]:
-    """ Returns a list of inputted strings """
-    inputs = []
-    if '-' in selection:
-        for number in range(int(selection.split('-')[0]), int(selection.split('-')[1]) + 1):
-            inputs.append(number)
-    else:
-        selections = selection.split(',')
-        for i in selections:
-            inputs.append(i.strip())
-    return inputs
+    @staticmethod
+    def from_string(s):
+        try:
+            return ImageSize[s.upper()]
+        except Exception:
+            return s
 
 
-def splash() -> str:
-    """ Displays splash screen """
-    return """
-███████╗ ██████╗ ████████╗██╗███████╗██╗   ██╗
-╚══███╔╝██╔═══██╗╚══██╔══╝██║██╔════╝╚██╗ ██╔╝
-  ███╔╝ ██║   ██║   ██║   ██║█████╗   ╚████╔╝ 
- ███╔╝  ██║   ██║   ██║   ██║██╔══╝    ╚██╔╝  
-███████╗╚██████╔╝   ██║   ██║██║        ██║   
-╚══════╝ ╚═════╝    ╚═╝   ╚═╝╚═╝        ╚═╝   
+class MetadataEntry:
+    name: str
+    value: Any
+    string: str
+
+    def __init__(self, name: str, value: Any, string_value: str | None = None):
+        """
+        Holds metadata entries
+        args:
+            name: name of metadata key
+            value: Value to use in metadata tags
+            string_value: Value when used in output formatting, if none is provided
+            will use value from previous argument.
+        """
+        self.name = name
+
+        if isinstance(value, tuple):
+            value = "\0".join(value)
+        self.value = value
+
+        if string_value is None:
+            string_value = self.value
+        if isinstance(string_value, list):
+            string_value = ", ".join(string_value)
+        self.string = str(string_value)
+
+
+class PlayableType(Enum):
+    TRACK = "track"
+    EPISODE = "episode"
+
+
+class PlayableData(NamedTuple):
+    type: PlayableType
+    id: str
+    library: Path
+    output_template: str
+    metadata: list[MetadataEntry] = []
+
+
+class OptionalOrFalse(Action):
+    def __init__(
+        self,
+        option_strings,
+        dest,
+        nargs="?",
+        default=None,
+        type=None,
+        choices=None,
+        required=False,
+        help=None,
+        metavar=None,
+    ):
+        _option_strings = []
+        for option_string in option_strings:
+            _option_strings.append(option_string)
+
+            if option_string.startswith("--"):
+                option_string = "--no-" + option_string[2:]
+                _option_strings.append(option_string)
+
+        super().__init__(
+            option_strings=_option_strings,
+            dest=dest,
+            nargs=nargs,
+            default=default,
+            type=type,
+            choices=choices,
+            required=required,
+            help=help,
+            metavar=metavar,
+        )
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if values is not None:
+            raise ArgumentError(self, "expected 0 arguments")
+        setattr(
+            namespace,
+            self.dest,
+            (
+                True
+                if not (
+                    option_string.startswith("--no-")
+                    or option_string.startswith("--dont-")
+                )
+                else False
+            ),
+        )
+
+
+def fix_filename(
+    filename: str,
+    substitute: str = "_",
+) -> str:
     """
-
-
-def clear() -> None:
-    """ Clear the console window """
-    if platform.system() == WINDOWS_SYSTEM:
-        os.system('cls')
-    else:
-        os.system('clear')
-
-
-def set_audio_tags(filename, artists, genres, name, album_name, release_year, disc_number, track_number) -> None:
-    """ sets music_tag metadata """
-    tags = music_tag.load_file(filename)
-    tags[ALBUMARTIST] = artists[0]
-    tags[ARTIST] = conv_artist_format(artists)
-    tags[GENRE] = genres[0] if not Zotify.CONFIG.get_all_genres() else Zotify.CONFIG.get_all_genres_delimiter().join(genres)
-    tags[TRACKTITLE] = name
-    tags[ALBUM] = album_name
-    tags[YEAR] = release_year
-    tags[DISCNUMBER] = disc_number
-    tags[TRACKNUMBER] = track_number
-    tags.save()
-
-
-def conv_artist_format(artists) -> str:
-    """ Returns converted artist format """
-    return ', '.join(artists)
-
-
-def set_music_thumbnail(filename, image_url) -> None:
-    """ Downloads cover artwork """
-    img = requests.get(image_url).content
-    tags = music_tag.load_file(filename)
-    tags[ARTWORK] = img
-    tags.save()
-
-
-def regex_input_for_urls(search_input) -> Tuple[str, str, str, str, str, str]:
-    """ Since many kinds of search may be passed at the command line, process them all here. """
-    track_uri_search = re.search(
-        r'^spotify:track:(?P<TrackID>[0-9a-zA-Z]{22})$', search_input)
-    track_url_search = re.search(
-        r'^(https?://)?open\.spotify\.com/track/(?P<TrackID>[0-9a-zA-Z]{22})(\?si=.+?)?$',
-        search_input,
-    )
-
-    album_uri_search = re.search(
-        r'^spotify:album:(?P<AlbumID>[0-9a-zA-Z]{22})$', search_input)
-    album_url_search = re.search(
-        r'^(https?://)?open\.spotify\.com/album/(?P<AlbumID>[0-9a-zA-Z]{22})(\?si=.+?)?$',
-        search_input,
-    )
-
-    playlist_uri_search = re.search(
-        r'^spotify:playlist:(?P<PlaylistID>[0-9a-zA-Z]{22})$', search_input)
-    playlist_url_search = re.search(
-        r'^(https?://)?open\.spotify\.com/playlist/(?P<PlaylistID>[0-9a-zA-Z]{22})(\?si=.+?)?$',
-        search_input,
-    )
-
-    episode_uri_search = re.search(
-        r'^spotify:episode:(?P<EpisodeID>[0-9a-zA-Z]{22})$', search_input)
-    episode_url_search = re.search(
-        r'^(https?://)?open\.spotify\.com/episode/(?P<EpisodeID>[0-9a-zA-Z]{22})(\?si=.+?)?$',
-        search_input,
-    )
-
-    show_uri_search = re.search(
-        r'^spotify:show:(?P<ShowID>[0-9a-zA-Z]{22})$', search_input)
-    show_url_search = re.search(
-        r'^(https?://)?open\.spotify\.com/show/(?P<ShowID>[0-9a-zA-Z]{22})(\?si=.+?)?$',
-        search_input,
-    )
-
-    artist_uri_search = re.search(
-        r'^spotify:artist:(?P<ArtistID>[0-9a-zA-Z]{22})$', search_input)
-    artist_url_search = re.search(
-        r'^(https?://)?open\.spotify\.com/artist/(?P<ArtistID>[0-9a-zA-Z]{22})(\?si=.+?)?$',
-        search_input,
-    )
-
-    if track_uri_search is not None or track_url_search is not None:
-        track_id_str = (track_uri_search
-                        if track_uri_search is not None else
-                        track_url_search).group('TrackID')
-    else:
-        track_id_str = None
-
-    if album_uri_search is not None or album_url_search is not None:
-        album_id_str = (album_uri_search
-                        if album_uri_search is not None else
-                        album_url_search).group('AlbumID')
-    else:
-        album_id_str = None
-
-    if playlist_uri_search is not None or playlist_url_search is not None:
-        playlist_id_str = (playlist_uri_search
-                           if playlist_uri_search is not None else
-                           playlist_url_search).group('PlaylistID')
-    else:
-        playlist_id_str = None
-
-    if episode_uri_search is not None or episode_url_search is not None:
-        episode_id_str = (episode_uri_search
-                          if episode_uri_search is not None else
-                          episode_url_search).group('EpisodeID')
-    else:
-        episode_id_str = None
-
-    if show_uri_search is not None or show_url_search is not None:
-        show_id_str = (show_uri_search
-                       if show_uri_search is not None else
-                       show_url_search).group('ShowID')
-    else:
-        show_id_str = None
-
-    if artist_uri_search is not None or artist_url_search is not None:
-        artist_id_str = (artist_uri_search
-                         if artist_uri_search is not None else
-                         artist_url_search).group('ArtistID')
-    else:
-        artist_id_str = None
-
-    return track_id_str, album_id_str, playlist_id_str, episode_id_str, show_id_str, artist_id_str
-
-
-def fix_filename(name):
+    Replace invalid characters. Trailing spaces & periods are ignored.
+    Original list from https://stackoverflow.com/a/31976060/819417
+    Args:
+        filename: The name of the file to repair
+        substitute: Replacement character for disallowed characters
+    Returns:
+        Filename with replaced characters
     """
-    Replace invalid characters on Linux/Windows/MacOS with underscores.
-    List from https://stackoverflow.com/a/31976060/819417
-    Trailing spaces & periods are ignored on Windows.
-    >>> fix_filename("  COM1  ")
-    '_ COM1 _'
-    >>> fix_filename("COM10")
-    'COM10'
-    >>> fix_filename("COM1,")
-    'COM1,'
-    >>> fix_filename("COM1.txt")
-    '_.txt'
-    >>> all('_' == fix_filename(chr(i)) for i in list(range(32)))
-    True
+    regex = (
+        r"[/\\:|<>\"?*\0-\x1f]|^(AUX|COM[1-9]|CON|LPT[1-9]|NUL|PRN)(?![^.])|^\s|[\s.]$"
+    )
+    return sub(regex, substitute, str(filename), flags=IGNORECASE)
+
+
+def bytes_to_base62(id: bytes) -> str:
     """
-    return re.sub(r'[/\\:|<>"?*\0-\x1f]|^(AUX|COM[1-9]|CON|LPT[1-9]|NUL|PRN)(?![^.])|^\s|[\s.]$', "_", str(name), flags=re.IGNORECASE)
-
-
-def fmt_seconds(secs: float) -> str:
-    val = math.floor(secs)
-
-    s = math.floor(val % 60)
-    val -= s
-    val /= 60
-
-    m = math.floor(val % 60)
-    val -= m
-    val /= 60
-
-    h = math.floor(val)
-
-    if h == 0 and m == 0 and s == 0:
-        return "0s"
-    elif h == 0 and m == 0:
-        return f'{s}s'.zfill(2)
-    elif h == 0:
-        return f'{m}'.zfill(2) + ':' + f'{s}'.zfill(2)
-    else:
-        return f'{h}'.zfill(2) + ':' + f'{m}'.zfill(2) + ':' + f'{s}'.zfill(2)
+    Converts bytes to base62
+    Args:
+        id: bytes
+    Returns:
+        base62
+    """
+    return BASE62.encode(id, 22).decode()

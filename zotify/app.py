@@ -1,310 +1,326 @@
-from librespot.audio.decoders import AudioQuality
-from tabulate import tabulate
+from argparse import Namespace
 from pathlib import Path
+from typing import Any
 
-from zotify.album import download_album, download_artist_albums
-from zotify.const import TRACK, NAME, ID, ARTIST, ARTISTS, ITEMS, TRACKS, EXPLICIT, ALBUM, ALBUMS, \
-    OWNER, PLAYLIST, PLAYLISTS, DISPLAY_NAME, TYPE
+from zotify import OAuth, Session
+from zotify.collections import Album, Artist, Collection, Episode, Playlist, Show, Track
+from zotify.config import Config
+from zotify.file import TranscodingError
 from zotify.loader import Loader
-from zotify.playlist import get_playlist_songs, get_playlist_info, download_from_user_playlist, download_playlist
-from zotify.podcast import download_episode, get_show_episodes
-from zotify.termoutput import Printer, PrintChannel
-from zotify.track import download_track, get_saved_tracks, get_followed_artists
-from zotify.utils import splash, split_input, regex_input_for_urls
-from zotify.zotify import Zotify
-
-SEARCH_URL = 'https://api.spotify.com/v1/search'
+from zotify.logger import LogChannel, Logger
+from zotify.utils import AudioFormat, PlayableType
 
 
-def client(args) -> None:
-    """ Connects to download server to perform query's and get songs to download """
-    Zotify(args)
-
-    Printer.print(PrintChannel.SPLASH, splash())
-
-    quality_options = {
-        'auto': AudioQuality.VERY_HIGH if Zotify.check_premium() else AudioQuality.HIGH,
-        'normal': AudioQuality.NORMAL,
-        'high': AudioQuality.HIGH,
-        'very_high': AudioQuality.VERY_HIGH
-    }
-    Zotify.DOWNLOAD_QUALITY = quality_options[Zotify.CONFIG.get_download_quality()]
-
-    if args.download:
-        urls = []
-        filename = args.download
-        if Path(filename).exists():
-            with open(filename, 'r', encoding='utf-8') as file:
-                urls.extend([line.strip() for line in file.readlines()])
-
-            download_from_urls(urls)
-
-        else:
-            Printer.print(PrintChannel.ERRORS, f'File {filename} not found.\n')
-        return
-
-    if args.urls:
-        if len(args.urls) > 0:
-            download_from_urls(args.urls)
-        return
-
-    if args.playlist:
-        download_from_user_playlist()
-        return
-
-    if args.liked_songs:
-        for song in get_saved_tracks():
-            if not song[TRACK][NAME] or not song[TRACK][ID]:
-                Printer.print(PrintChannel.SKIPS, '###   SKIPPING:  SONG DOES NOT EXIST ANYMORE   ###' + "\n")
-            else:
-                download_track('liked', song[TRACK][ID])
-        return
-    
-    if args.followed_artists:
-        for artist in get_followed_artists():
-            download_artist_albums(artist)
-        return
-
-    if args.search:
-        if args.search == ' ':
-            search_text = ''
-            while len(search_text) == 0:
-                search_text = input('Enter search: ')
-            search(search_text)
-        else:
-            if not download_from_urls([args.search]):
-                search(args.search)
-        return
-
-    else:
-        search_text = ''
-        while len(search_text) == 0:
-            search_text = input('Enter search: ')
-        search(search_text)
-
-def download_from_urls(urls: list[str]) -> bool:
-    """ Downloads from a list of urls """
-    download = False
-
-    for spotify_url in urls:
-        track_id, album_id, playlist_id, episode_id, show_id, artist_id = regex_input_for_urls(spotify_url)
-
-        if track_id is not None:
-            download = True
-            download_track('single', track_id)
-        elif artist_id is not None:
-            download = True
-            download_artist_albums(artist_id)
-        elif album_id is not None:
-            download = True
-            download_album(album_id)
-        elif playlist_id is not None:
-            download = True
-            playlist_songs = get_playlist_songs(playlist_id)
-            name, _ = get_playlist_info(playlist_id)
-            enum = 1
-            char_num = len(str(len(playlist_songs)))
-            for song in playlist_songs:
-                if not song[TRACK][NAME] or not song[TRACK][ID]:
-                    Printer.print(PrintChannel.SKIPS, '###   SKIPPING:  SONG DOES NOT EXIST ANYMORE   ###' + "\n")
-                else:
-                    if song[TRACK][TYPE] == "episode": # Playlist item is a podcast episode
-                        download_episode(song[TRACK][ID])
-                    else:
-                        download_track('playlist', song[TRACK][ID], extra_keys=
-                        {
-                            'playlist_song_name': song[TRACK][NAME],
-                            'playlist': name,
-                            'playlist_num': str(enum).zfill(char_num),
-                            'playlist_id': playlist_id,
-                            'playlist_track_id': song[TRACK][ID]
-                        })
-                    enum += 1
-        elif episode_id is not None:
-            download = True
-            download_episode(episode_id)
-        elif show_id is not None:
-            download = True
-            for episode in get_show_episodes(show_id):
-                download_episode(episode)
-
-    return download
+class ParseError(ValueError): ...
 
 
-def search(search_term):
-    """ Searches download server's API for relevant data """
-    params = {'limit': '10',
-              'offset': '0',
-              'q': search_term,
-              'type': 'track,album,artist,playlist'}
+class Selection:
+    def __init__(self, session: Session):
+        self.__session = session
+        self.__items: list[dict[str, Any]] = []
+        self.__print_labels = {
+            "album": ("name", "artists"),
+            "playlist": ("name", "owner"),
+            "track": ("title", "artists", "album"),
+            "show": ("title", "creator"),
+        }
 
-    # Parse args
-    splits = search_term.split()
-    for split in splits:
-        index = splits.index(split)
+    def search(
+        self,
+        search_text: str,
+        category: list[str] = [
+            "track",
+            "album",
+            "artist",
+            "playlist",
+            "show",
+            "episode",
+        ],
+    ) -> list[str]:
+        categories = ",".join(category)
+        with Loader("Searching..."):
+            country = self.__session.api().invoke_url("me")["country"]
+            resp = self.__session.api().invoke_url(
+                "search",
+                {
+                    "q": search_text,
+                    "type": categories,
+                    "include_external": "audio",
+                    "market": country,
+                },
+                limit=10,
+                offset=0,
+            )
 
-        if split[0] == '-' and len(split) > 1:
-            if len(splits)-1 == index:
-                raise IndexError('No parameters passed after option: {}\n'.
-                                 format(split))
+        print(f'Search results for "{search_text}"')
+        count = 0
+        for cat in categories.split(","):
+            label = cat + "s"
+            items = resp[label]["items"]
+            if len(items) > 0:
+                print(f"\n{label.capitalize()}:")
+                try:
+                    self.__print(count, items, *self.__print_labels[cat])
+                except KeyError:
+                    self.__print(count, items, "name")
+                count += len(items)
+                self.__items.extend(items)
+        return self.__get_selection()
 
-        if split == '-l' or split == '-limit':
+    def get(self, category: str, name: str = "", content: str = "") -> list[str]:
+        with Loader("Fetching items..."):
+            r = self.__session.api().invoke_url(f"me/{category}", limit=50)
+            if content != "":
+                r = r[content]
+            resp = r["items"]
+
+        for i in range(len(resp)):
             try:
-                int(splits[index+1])
-            except ValueError:
-                raise ValueError('Parameter passed after {} option must be an integer.\n'.
-                                 format(split))
-            if int(splits[index+1]) > 50:
-                raise ValueError('Invalid limit passed. Max is 50.\n')
-            params['limit'] = splits[index+1]
+                item = resp[i][name]
+            except KeyError:
+                item = resp[i]
+            self.__items.append(item)
+            print(
+                "{:<2} {:<38}".format(i + 1, self.__fix_string_length(item["name"], 38))
+            )
+        return self.__get_selection()
 
-        if split == '-t' or split == '-type':
+    @staticmethod
+    def from_file(file_path: Path) -> list[str]:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return [line.strip() for line in f.readlines()]
 
-            allowed_types = ['track', 'playlist', 'album', 'artist']
-            passed_types = []
-            for i in range(index+1, len(splits)):
-                if splits[i][0] == '-':
-                    break
-
-                if splits[i] not in allowed_types:
-                    raise ValueError('Parameters passed after {} option must be from this list:\n{}'.
-                                     format(split, '\n'.join(allowed_types)))
-
-                passed_types.append(splits[i])
-            params['type'] = ','.join(passed_types)
-
-    if len(params['type']) == 0:
-        params['type'] = 'track,album,artist,playlist'
-
-    # Clean search term
-    search_term_list = []
-    for split in splits:
-        if split[0] == "-":
-            break
-        search_term_list.append(split)
-    if not search_term_list:
-        raise ValueError("Invalid query.")
-    params["q"] = ' '.join(search_term_list)
-
-    resp = Zotify.invoke_url_with_params(SEARCH_URL, **params)
-
-    counter = 1
-    dics = []
-
-    total_tracks = 0
-    if TRACK in params['type'].split(','):
-        tracks = resp[TRACKS][ITEMS]
-        if len(tracks) > 0:
-            print('###  TRACKS  ###')
-            track_data = []
-            for track in tracks:
-                if track[EXPLICIT]:
-                    explicit = '[E]'
-                else:
-                    explicit = ''
-
-                track_data.append([counter, f'{track[NAME]} {explicit}',
-                                  ','.join([artist[NAME] for artist in track[ARTISTS]])])
-                dics.append({
-                    ID: track[ID],
-                    NAME: track[NAME],
-                    'type': TRACK,
-                })
-
-                counter += 1
-            total_tracks = counter - 1
-            print(tabulate(track_data, headers=[
-                  'S.NO', 'Name', 'Artists'], tablefmt='pretty'))
-            print('\n')
-            del tracks
-            del track_data
-
-    total_albums = 0
-    if ALBUM in params['type'].split(','):
-        albums = resp[ALBUMS][ITEMS]
-        if len(albums) > 0:
-            print('###  ALBUMS  ###')
-            album_data = []
-            for album in albums:
-                album_data.append([counter, album[NAME],
-                                  ','.join([artist[NAME] for artist in album[ARTISTS]])])
-                dics.append({
-                    ID: album[ID],
-                    NAME: album[NAME],
-                    'type': ALBUM,
-                })
-
-                counter += 1
-            total_albums = counter - total_tracks - 1
-            print(tabulate(album_data, headers=[
-                  'S.NO', 'Album', 'Artists'], tablefmt='pretty'))
-            print('\n')
-            del albums
-            del album_data
-
-    total_artists = 0
-    if ARTIST in params['type'].split(','):
-        artists = resp[ARTISTS][ITEMS]
-        if len(artists) > 0:
-            print('###  ARTISTS  ###')
-            artist_data = []
-            for artist in artists:
-                artist_data.append([counter, artist[NAME]])
-                dics.append({
-                    ID: artist[ID],
-                    NAME: artist[NAME],
-                    'type': ARTIST,
-                })
-                counter += 1
-            total_artists = counter - total_tracks - total_albums - 1
-            print(tabulate(artist_data, headers=[
-                  'S.NO', 'Name'], tablefmt='pretty'))
-            print('\n')
-            del artists
-            del artist_data
-
-    total_playlists = 0
-    if PLAYLIST in params['type'].split(','):
-        playlists = resp[PLAYLISTS][ITEMS]
-        if len(playlists) > 0:
-            print('###  PLAYLISTS  ###')
-            playlist_data = []
-            for playlist in playlists:
-                playlist_data.append(
-                    [counter, playlist[NAME], playlist[OWNER][DISPLAY_NAME]])
-                dics.append({
-                    ID: playlist[ID],
-                    NAME: playlist[NAME],
-                    'type': PLAYLIST,
-                })
-                counter += 1
-            total_playlists = counter - total_artists - total_tracks - total_albums - 1
-            print(tabulate(playlist_data, headers=[
-                  'S.NO', 'Name', 'Owner'], tablefmt='pretty'))
-            print('\n')
-            del playlists
-            del playlist_data
-
-    if total_tracks + total_albums + total_artists + total_playlists == 0:
-        print('NO RESULTS FOUND - EXITING...')
-    else:
-        selection = ''
-        print('> SELECT A DOWNLOAD OPTION BY ID')
-        print('> SELECT A RANGE BY ADDING A DASH BETWEEN BOTH ID\'s')
-        print('> OR PARTICULAR OPTIONS BY ADDING A COMMA BETWEEN ID\'s\n')
+    def __get_selection(self) -> list[str]:
+        print("\nResults to save (eg: 1,2,5 1-3)")
+        selection = ""
         while len(selection) == 0:
-            selection = str(input('ID(s): '))
-        inputs = split_input(selection)
-        for pos in inputs:
-            position = int(pos)
-            for dic in dics:
-                print_pos = dics.index(dic) + 1
-                if print_pos == position:
-                    if dic['type'] == TRACK:
-                        download_track('single', dic[ID])
-                    elif dic['type'] == ALBUM:
-                        download_album(dic[ID])
-                    elif dic['type'] == ARTIST:
-                        download_artist_albums(dic[ID])
+            selection = input("==> ")
+        ids = []
+        selections = selection.split(",")
+        for i in selections:
+            if "-" in i:
+                split = i.split("-")
+                for x in range(int(split[0]), int(split[1]) + 1):
+                    ids.append(self.__items[x - 1]["uri"])
+            else:
+                ids.append(self.__items[int(i) - 1]["uri"])
+        return ids
+
+    def __print(self, count: int, items: list[dict[str, Any]], *args: str) -> None:
+        arg_range = range(len(args))
+        category_str = "#  " + " ".join("{:<38}" for _ in arg_range)
+        print(category_str.format(*[s.upper() for s in list(args)]))
+        for item in items:
+            count += 1
+            fmt_str = "{:<2} ".format(count) + " ".join("{:<38}" for _ in arg_range)
+            fmt_vals: list[str] = []
+            for arg in args:
+                match arg:
+                    case "artists":
+                        fmt_vals.append(
+                            ", ".join([artist["name"] for artist in item["artists"]])
+                        )
+                    case "owner":
+                        fmt_vals.append(item["owner"]["display_name"])
+                    case "album":
+                        fmt_vals.append(item["album"]["name"])
+                    case "creator":
+                        fmt_vals.append(item["publisher"])
+                    case "title":
+                        fmt_vals.append(item["name"])
+                    case _:
+                        fmt_vals.append(item[arg])
+            print(
+                fmt_str.format(
+                    *(self.__fix_string_length(fmt_vals[x], 38) for x in arg_range),
+                )
+            )
+
+    @staticmethod
+    def __fix_string_length(text: str, max_length: int) -> str:
+        if len(text) > max_length:
+            return text[: max_length - 3] + "..."
+        return text
+
+
+class App:
+    def __init__(self, args: Namespace):
+        self.__config = Config(args)
+        Logger(self.__config)
+
+        # Create session
+        if args.username != "" and args.token != "":
+            oauth = OAuth(args.username)
+            oauth.set_token(args.token, OAuth.RequestType.REFRESH)
+            self.__session = Session.from_oauth(
+                oauth, self.__config.credentials_path, self.__config.language
+            )
+        elif self.__config.credentials_path.is_file():
+            self.__session = Session.from_file(
+                self.__config.credentials_path,
+                self.__config.language,
+            )
+        else:
+            username = args.username
+            while username == "":
+                username = input("Username: ")
+            oauth = OAuth(username)
+            auth_url = oauth.auth_interactive()
+            print(f"\nClick on the following link to login:\n{auth_url}")
+            self.__session = Session.from_oauth(
+                oauth, self.__config.credentials_path, self.__config.language
+            )
+
+        # Get items to download
+        ids = self.get_selection(args)
+        with Loader("Parsing input..."):
+            try:
+                collections = self.parse(ids)
+            except ParseError as e:
+                Logger.log(LogChannel.ERRORS, str(e))
+                exit(1)
+        if len(collections) > 0:
+            self.download_all(collections)
+        else:
+            Logger.log(LogChannel.WARNINGS, "there is nothing to do")
+        exit(0)
+
+    def get_selection(self, args: Namespace) -> list[str]:
+        selection = Selection(self.__session)
+        try:
+            if args.search:
+                return selection.search(" ".join(args.search), args.category)
+            elif args.playlist:
+                return selection.get("playlists")
+            elif args.followed:
+                return selection.get("following?type=artist", content="artists")
+            elif args.liked_tracks:
+                return selection.get("tracks", "track")
+            elif args.liked_episodes:
+                return selection.get("episodes")
+            elif args.download:
+                ids = []
+                for x in args.download:
+                    ids.extend(selection.from_file(x))
+                return ids
+            elif args.urls:
+                return args.urls
+        except KeyboardInterrupt:
+            Logger.log(LogChannel.WARNINGS, "\nthere is nothing to do")
+            exit(130)
+        except (FileNotFoundError, ValueError):
+            pass
+        Logger.log(LogChannel.WARNINGS, "there is nothing to do")
+        exit(0)
+
+    def parse(self, links: list[str]) -> list[Collection]:
+        collections: list[Collection] = []
+        for link in links:
+            link = link.rsplit("?", 1)[0]
+            try:
+                split = link.split(link[-23])
+                _id = split[-1]
+                id_type = split[-2]
+            except IndexError:
+                raise ParseError(f'Could not parse "{link}"')
+
+            collection_types = {
+                "album": Album,
+                "artist": Artist,
+                "show": Show,
+                "track": Track,
+                "episode": Episode,
+                "playlist": Playlist,
+            }
+            try:
+                collections.append(
+                    collection_types[id_type](_id, self.__session.api(), self.__config)
+                )
+            except ValueError:
+                raise ParseError(f'Unsupported content type "{id_type}"')
+        return collections
+
+    def download_all(self, collections: list[Collection]) -> None:
+        count = 0
+        total = sum(len(c.playables) for c in collections)
+        for collection in collections:
+            for playable in collection.playables:
+                count += 1
+
+                # Get track data
+                if playable.type == PlayableType.TRACK:
+                    with Loader("Fetching track..."):
+                        track = self.__session.get_track(
+                            playable.id, self.__config.download_quality
+                        )
+                elif playable.type == PlayableType.EPISODE:
+                    with Loader("Fetching episode..."):
+                        track = self.__session.get_episode(playable.id)
+                else:
+                    Logger.log(
+                        LogChannel.SKIPS,
+                        f'Download Error: Unknown playable content "{playable.type}"',
+                    )
+                    continue
+
+                # Create download location and generate file name
+                track.metadata.extend(playable.metadata)
+                try:
+                    output = track.create_output(
+                        playable.library,
+                        playable.output_template,
+                        self.__config.replace_existing,
+                    )
+                except FileExistsError:
+                    Logger.log(
+                        LogChannel.SKIPS,
+                        f'Skipping "{track.name}": Already exists at specified output',
+                    )
+                    continue
+
+                # Download track
+                with Logger.progress(
+                    desc=f"({count}/{total}) {track.name}",
+                    total=track.input_stream.size,
+                ) as p_bar:
+                    file = track.write_audio_stream(output, p_bar)
+
+                # Download lyrics
+                if playable.type == PlayableType.TRACK and self.__config.lyrics_file:
+                    if not self.__session.is_premium():
+                        Logger.log(
+                            LogChannel.SKIPS,
+                            f'Failed to save lyrics for "{track.name}": Lyrics are only available to premium users',
+                        )
                     else:
-                        download_playlist(dic)
+                        with Loader("Fetching lyrics..."):
+                            try:
+                                track.lyrics().save(output)
+                            except FileNotFoundError as e:
+                                Logger.log(LogChannel.SKIPS, str(e))
+                Logger.log(LogChannel.DOWNLOADS, f"\nDownloaded {track.name}")
+
+                # Transcode audio
+                if (
+                    self.__config.audio_format != AudioFormat.VORBIS
+                    or self.__config.ffmpeg_args != ""
+                ):
+                    try:
+                        with Loader("Converting audio..."):
+                            file.transcode(
+                                self.__config.audio_format,
+                                self.__config.transcode_bitrate,
+                                True,
+                                self.__config.ffmpeg_path,
+                                self.__config.ffmpeg_args.split(),
+                            )
+                    except TranscodingError as e:
+                        Logger.log(LogChannel.ERRORS, str(e))
+
+                # Write metadata
+                if self.__config.save_metadata:
+                    with Loader("Writing metadata..."):
+                        file.write_metadata(track.metadata)
+                        file.write_cover_art(
+                            track.get_cover_art(self.__config.artwork_size)
+                        )

@@ -1,310 +1,353 @@
-import json
-import sys
-from pathlib import Path, PurePath
+from argparse import Namespace
+from json import dump, load
+from os import environ
+from pathlib import Path
+from sys import platform as PLATFORM
 from typing import Any
 
+from zotify.utils import AudioFormat, ImageSize, Quality
 
-ROOT_PATH = 'ROOT_PATH'
-ROOT_PODCAST_PATH = 'ROOT_PODCAST_PATH'
-SKIP_EXISTING = 'SKIP_EXISTING'
-SKIP_PREVIOUSLY_DOWNLOADED = 'SKIP_PREVIOUSLY_DOWNLOADED'
-DOWNLOAD_FORMAT = 'DOWNLOAD_FORMAT'
-BULK_WAIT_TIME = 'BULK_WAIT_TIME'
-OVERRIDE_AUTO_WAIT = 'OVERRIDE_AUTO_WAIT'
-CHUNK_SIZE = 'CHUNK_SIZE'
-SPLIT_ALBUM_DISCS = 'SPLIT_ALBUM_DISCS'
-DOWNLOAD_REAL_TIME = 'DOWNLOAD_REAL_TIME'
-LANGUAGE = 'LANGUAGE'
-DOWNLOAD_QUALITY = 'DOWNLOAD_QUALITY'
-TRANSCODE_BITRATE = 'TRANSCODE_BITRATE'
-SONG_ARCHIVE = 'SONG_ARCHIVE'
-SAVE_CREDENTIALS = 'SAVE_CREDENTIALS'
-CREDENTIALS_LOCATION = 'CREDENTIALS_LOCATION'
-OUTPUT = 'OUTPUT'
-PRINT_SPLASH = 'PRINT_SPLASH'
-PRINT_SKIPS = 'PRINT_SKIPS'
-PRINT_DOWNLOAD_PROGRESS = 'PRINT_DOWNLOAD_PROGRESS'
-PRINT_ERRORS = 'PRINT_ERRORS'
-PRINT_DOWNLOADS = 'PRINT_DOWNLOADS'
-PRINT_API_ERRORS = 'PRINT_API_ERRORS'
-TEMP_DOWNLOAD_DIR = 'TEMP_DOWNLOAD_DIR'
-MD_SAVE_GENRES = 'MD_SAVE_GENRES'
-MD_ALLGENRES = 'MD_ALLGENRES'
-MD_GENREDELIMITER = 'MD_GENREDELIMITER'
-PRINT_PROGRESS_INFO = 'PRINT_PROGRESS_INFO'
-PRINT_WARNINGS = 'PRINT_WARNINGS'
-RETRY_ATTEMPTS = 'RETRY_ATTEMPTS'
-CONFIG_VERSION = 'CONFIG_VERSION'
-DOWNLOAD_LYRICS = 'DOWNLOAD_LYRICS'
+ALBUM_LIBRARY = "album_library"
+ALL_ARTISTS = "all_artists"
+ARTWORK_SIZE = "artwork_size"
+AUDIO_FORMAT = "audio_format"
+CREATE_PLAYLIST_FILE = "create_playlist_file"
+CREDENTIALS_PATH = "credentials_path"
+DOWNLOAD_QUALITY = "download_quality"
+FFMPEG_ARGS = "ffmpeg_args"
+FFMPEG_PATH = "ffmpeg_path"
+LANGUAGE = "language"
+LYRICS_FILE = "lyrics_file"
+LYRICS_ONLY = "lyrics_only"
+OUTPUT = "output"
+OUTPUT_ALBUM = "output_album"
+OUTPUT_PLAYLIST_TRACK = "output_playlist_track"
+OUTPUT_PLAYLIST_EPISODE = "output_playlist_episode"
+OUTPUT_PODCAST = "output_podcast"
+OUTPUT_SINGLE = "output_single"
+PATH_ARCHIVE = "path_archive"
+PLAYLIST_LIBRARY = "playlist_library"
+PODCAST_LIBRARY = "podcast_library"
+PRINT_DOWNLOADS = "print_downloads"
+PRINT_ERRORS = "print_errors"
+PRINT_PROGRESS = "print_progress"
+PRINT_SKIPS = "print_skips"
+PRINT_WARNINGS = "print_warnings"
+REPLACE_EXISTING = "replace_existing"
+SAVE_METADATA = "save_metadata"
+SAVE_SUBTITLES = "save_subtitles"
+SKIP_DUPLICATES = "skip_duplicates"
+SKIP_PREVIOUS = "skip_previous"
+TRANSCODE_BITRATE = "transcode_bitrate"
 
-CONFIG_VALUES = {
-    SAVE_CREDENTIALS:           { 'default': 'True',  'type': bool, 'arg': '--save-credentials'           },
-    CREDENTIALS_LOCATION:       { 'default': '',      'type': str,  'arg': '--credentials-location'       },
-    OUTPUT:                     { 'default': '',      'type': str,  'arg': '--output'                     },
-    SONG_ARCHIVE:               { 'default': '',      'type': str,  'arg': '--song-archive'               },
-    ROOT_PATH:                  { 'default': '',      'type': str,  'arg': '--root-path'                  },
-    ROOT_PODCAST_PATH:          { 'default': '',      'type': str,  'arg': '--root-podcast-path'          },
-    SPLIT_ALBUM_DISCS:          { 'default': 'False', 'type': bool, 'arg': '--split-album-discs'          },
-    DOWNLOAD_LYRICS:            { 'default': 'True',  'type': bool, 'arg': '--download-lyrics'            },
-    MD_SAVE_GENRES:             { 'default': 'False', 'type': bool, 'arg': '--md-save-genres'             },
-    MD_ALLGENRES:               { 'default': 'False', 'type': bool, 'arg': '--md-allgenres'               },
-    MD_GENREDELIMITER:          { 'default': ',',     'type': str,  'arg': '--md-genredelimiter'          },
-    DOWNLOAD_FORMAT:            { 'default': 'ogg',   'type': str,  'arg': '--download-format'            },
-    DOWNLOAD_QUALITY:           { 'default': 'auto',  'type': str,  'arg': '--download-quality'           },
-    TRANSCODE_BITRATE:          { 'default': 'auto',  'type': str,  'arg': '--transcode-bitrate'          },
-    SKIP_EXISTING:              { 'default': 'True',  'type': bool, 'arg': '--skip-existing'              },
-    SKIP_PREVIOUSLY_DOWNLOADED: { 'default': 'False', 'type': bool, 'arg': '--skip-previously-downloaded' },
-    RETRY_ATTEMPTS:             { 'default': '1',     'type': int,  'arg': '--retry-attempts'             },
-    BULK_WAIT_TIME:             { 'default': '1',     'type': int,  'arg': '--bulk-wait-time'             },
-    OVERRIDE_AUTO_WAIT:         { 'default': 'False', 'type': bool, 'arg': '--override-auto-wait'         },
-    CHUNK_SIZE:                 { 'default': '20000', 'type': int,  'arg': '--chunk-size'                 },
-    DOWNLOAD_REAL_TIME:         { 'default': 'False', 'type': bool, 'arg': '--download-real-time'         },
-    LANGUAGE:                   { 'default': 'en',    'type': str,  'arg': '--language'                   },
-    PRINT_SPLASH:               { 'default': 'False', 'type': bool, 'arg': '--print-splash'               },
-    PRINT_SKIPS:                { 'default': 'True',  'type': bool, 'arg': '--print-skips'                },
-    PRINT_DOWNLOAD_PROGRESS:    { 'default': 'True',  'type': bool, 'arg': '--print-download-progress'    },
-    PRINT_ERRORS:               { 'default': 'True',  'type': bool, 'arg': '--print-errors'               },
-    PRINT_DOWNLOADS:            { 'default': 'False', 'type': bool, 'arg': '--print-downloads'            },
-    PRINT_API_ERRORS:           { 'default': 'True',  'type': bool, 'arg': '--print-api-errors'           },
-    PRINT_PROGRESS_INFO:        { 'default': 'True',  'type': bool, 'arg': '--print-progress-info'        },
-    PRINT_WARNINGS:             { 'default': 'True',  'type': bool, 'arg': '--print-warnings'             },
-    TEMP_DOWNLOAD_DIR:          { 'default': '',      'type': str,  'arg': '--temp-download-dir'          }
+SYSTEM_PATHS = {
+    "win32": Path.home().joinpath("AppData/Roaming/Zotify"),
+    "darwin": Path.home().joinpath("Library/Application Support/Zotify"),
+    "linux": Path(environ.get("XDG_CONFIG_HOME") or "~/.config")
+    .expanduser()
+    .joinpath("zotify"),
 }
 
-OUTPUT_DEFAULT_PLAYLIST = '{playlist}/{artist} - {song_name}.{ext}'
-OUTPUT_DEFAULT_PLAYLIST_EXT = '{playlist}/{playlist_num} - {artist} - {song_name}.{ext}'
-OUTPUT_DEFAULT_LIKED_SONGS = 'Liked Songs/{artist} - {song_name}.{ext}'
-OUTPUT_DEFAULT_SINGLE = '{artist}/{album}/{artist} - {song_name}.{ext}'
-OUTPUT_DEFAULT_ALBUM = '{artist}/{album}/{album_num} - {artist} - {song_name}.{ext}'
+LIBRARY_PATHS = {
+    "album": Path.home().joinpath("Music/Zotify Albums"),
+    "podcast": Path.home().joinpath("Music/Zotify Podcasts"),
+    "playlist": Path.home().joinpath("Music/Zotify Playlists"),
+}
+
+CONFIG_PATHS = {
+    "conf": SYSTEM_PATHS[PLATFORM].joinpath("config.json"),
+    "creds": SYSTEM_PATHS[PLATFORM].joinpath("credentials.json"),
+    "archive": SYSTEM_PATHS[PLATFORM].joinpath("track_archive"),
+}
+
+OUTPUT_PATHS = {
+    "album": "{album_artist}/{album}/{track_number}. {artists} - {title}",
+    "podcast": "{podcast}/{episode_number} - {title}",
+    "playlist_track": "{playlist}/{artists} - {title}",
+    "playlist_episode": "{playlist}/{episode_number} - {title}",
+}
+
+CONFIG_VALUES = {
+    CREDENTIALS_PATH: {
+        "default": CONFIG_PATHS["creds"],
+        "type": Path,
+        "args": ["--credentials"],
+        "help": "Path to credentials file",
+    },
+    PATH_ARCHIVE: {
+        "default": CONFIG_PATHS["archive"],
+        "type": Path,
+        "args": ["--archive"],
+        "help": "Path to track archive file",
+    },
+    ALBUM_LIBRARY: {
+        "default": LIBRARY_PATHS["album"],
+        "type": Path,
+        "args": ["--album-library"],
+        "help": "Path to root of album library",
+    },
+    PODCAST_LIBRARY: {
+        "default": LIBRARY_PATHS["podcast"],
+        "type": Path,
+        "args": ["--podcast-library"],
+        "help": "Path to root of podcast library",
+    },
+    PLAYLIST_LIBRARY: {
+        "default": LIBRARY_PATHS["playlist"],
+        "type": Path,
+        "args": ["--playlist-library"],
+        "help": "Path to root of playlist library",
+    },
+    OUTPUT_ALBUM: {
+        "default": OUTPUT_PATHS["album"],
+        "type": str,
+        "args": ["--output-album", "-oa"],
+        "help": "File layout for saved albums",
+    },
+    OUTPUT_PLAYLIST_TRACK: {
+        "default": OUTPUT_PATHS["playlist_track"],
+        "type": str,
+        "args": ["--output-playlist-track", "-opt"],
+        "help": "File layout for tracks in a playlist",
+    },
+    OUTPUT_PLAYLIST_EPISODE: {
+        "default": OUTPUT_PATHS["playlist_episode"],
+        "type": str,
+        "args": ["--output-playlist-episode", "-ope"],
+        "help": "File layout for episodes in a playlist",
+    },
+    OUTPUT_PODCAST: {
+        "default": OUTPUT_PATHS["podcast"],
+        "type": str,
+        "args": ["--output-podcast", "-op"],
+        "help": "File layout for saved podcasts",
+    },
+    DOWNLOAD_QUALITY: {
+        "default": "auto",
+        "type": Quality.from_string,
+        "choices": list(Quality),
+        "args": ["--download-quality"],
+        "help": "Audio download quality (auto for highest available)",
+    },
+    ARTWORK_SIZE: {
+        "default": "large",
+        "type": ImageSize.from_string,
+        "choices": list(ImageSize),
+        "args": ["--artwork-size"],
+        "help": "Image size of track's cover art",
+    },
+    AUDIO_FORMAT: {
+        "default": "vorbis",
+        "type": AudioFormat.from_string,
+        "choices": list(AudioFormat),
+        "args": ["--audio-format"],
+        "help": "Audio format of final track output",
+    },
+    TRANSCODE_BITRATE: {
+        "default": -1,
+        "type": int,
+        "args": ["--bitrate"],
+        "help": "Transcoding bitrate (-1 to use download rate)",
+    },
+    FFMPEG_PATH: {
+        "default": "",
+        "type": str,
+        "args": ["--ffmpeg-path"],
+        "help": "Path to ffmpeg binary",
+    },
+    FFMPEG_ARGS: {
+        "default": "",
+        "type": str,
+        "args": ["--ffmpeg-args"],
+        "help": "Additional ffmpeg arguments when transcoding",
+    },
+    SAVE_SUBTITLES: {
+        "default": False,
+        "type": bool,
+        "args": ["--save-subtitles"],
+        "help": "Save subtitles from podcasts to a .srt file",
+    },
+    LANGUAGE: {
+        "default": "en",
+        "type": str,
+        "args": ["--language"],
+        "help": "Language for metadata",
+    },
+    LYRICS_FILE: {
+        "default": False,
+        "type": bool,
+        "args": ["--lyrics-file"],
+        "help": "Save lyrics to a file",
+    },
+    LYRICS_ONLY: {
+        "default": False,
+        "type": bool,
+        "args": ["--lyrics-only"],
+        "help": "Only download lyrics and not actual audio",
+    },
+    CREATE_PLAYLIST_FILE: {
+        "default": True,
+        "type": bool,
+        "args": ["--playlist-file"],
+        "help": "Save playlist information to an m3u8 file",
+    },
+    SAVE_METADATA: {
+        "default": True,
+        "type": bool,
+        "args": ["--save-metadata"],
+        "help": "Save metadata, required for other metadata options",
+    },
+    ALL_ARTISTS: {
+        "default": True,
+        "type": bool,
+        "args": ["--all-artists"],
+        "help": "Add all track artists to artist tag in metadata",
+    },
+    REPLACE_EXISTING: {
+        "default": False,
+        "type": bool,
+        "args": ["--replace-existing"],
+        "help": "Overwrite existing files with the same name",
+    },
+    SKIP_PREVIOUS: {
+        "default": True,
+        "type": bool,
+        "args": ["--skip-previous"],
+        "help": "Skip previously downloaded songs",
+    },
+    SKIP_DUPLICATES: {
+        "default": True,
+        "type": bool,
+        "args": ["--skip-duplicates"],
+        "help": "Skip downloading existing track to different album",
+    },
+    PRINT_DOWNLOADS: {
+        "default": False,
+        "type": bool,
+        "args": ["--print-downloads"],
+        "help": "Print messages when a song is finished downloading",
+    },
+    PRINT_PROGRESS: {
+        "default": True,
+        "type": bool,
+        "args": ["--print-progress"],
+        "help": "Show progress bars",
+    },
+    PRINT_SKIPS: {
+        "default": False,
+        "type": bool,
+        "args": ["--print-skips"],
+        "help": "Show messages if a song is being skipped",
+    },
+    PRINT_WARNINGS: {
+        "default": True,
+        "type": bool,
+        "args": ["--print-warnings"],
+        "help": "Show warnings",
+    },
+    PRINT_ERRORS: {
+        "default": True,
+        "type": bool,
+        "args": ["--print-errors"],
+        "help": "Show errors",
+    },
+}
 
 
 class Config:
-    Values = {}
+    __config_file: Path | None
+    album_library: Path
+    artwork_size: ImageSize
+    audio_format: AudioFormat
+    credentials_path: Path
+    download_quality: Quality
+    ffmpeg_args: str
+    ffmpeg_path: str
+    language: str
+    lyrics_file: bool
+    output_album: str
+    output_podcast: str
+    output_playlist_track: str
+    output_playlist_episode: str
+    playlist_library: Path
+    podcast_library: Path
+    print_progress: bool
+    replace_existing: bool
+    save_metadata: bool
+    transcode_bitrate: int
 
-    @classmethod
-    def load(cls, args) -> None:
-        system_paths = {
-            'win32': Path.home() / 'AppData/Roaming/Zotify',
-            'linux': Path.home() / '.config/zotify',
-            'darwin': Path.home() / 'Library/Application Support/Zotify'
-        }
-        if sys.platform not in system_paths:
-            config_fp = Path.cwd() / '.zotify/config.json'
+    def __init__(self, args: Namespace | None = None):
+        jsonvalues = {}
+        if args is not None and args.config:
+            self.__config_file = Path(args.config)
+            # Valid config file found
+            if self.__config_file.exists():
+                with open(self.__config_file, "r", encoding="utf-8") as conf:
+                    jsonvalues = load(conf)
+            # Remove config file and make a new one
+            else:
+                self.__config_file.parent.mkdir(parents=True, exist_ok=True)
+                jsonvalues = {}
+                for key in CONFIG_VALUES:
+                    if CONFIG_VALUES[key]["type"] in [str, int, bool]:
+                        jsonvalues[key] = CONFIG_VALUES[key]["default"]
+                    else:
+                        jsonvalues[key] = str(CONFIG_VALUES[key]["default"])
+                with open(self.__config_file, "w+", encoding="utf-8") as conf:
+                    dump(jsonvalues, conf, indent=4)
         else:
-            config_fp = system_paths[sys.platform] / 'config.json'
-        if args.config_location:
-            config_fp = args.config_location
-
-        true_config_file_path = Path(config_fp).expanduser()
-
-        # Load config from zconfig.json
-        Path(PurePath(true_config_file_path).parent).mkdir(parents=True, exist_ok=True)
-        if not Path(true_config_file_path).exists():
-            with open(true_config_file_path, 'w', encoding='utf-8') as config_file:
-                json.dump(cls.get_default_json(), config_file, indent=4)
-        with open(true_config_file_path, encoding='utf-8') as config_file:
-            jsonvalues = json.load(config_file)
-            cls.Values = {}
-            for key in CONFIG_VALUES:
-                if key in jsonvalues:
-                    cls.Values[key] = cls.parse_arg_value(key, jsonvalues[key])
-
-        # Add default values for missing keys
+            self.__config_file = None
 
         for key in CONFIG_VALUES:
-            if key not in cls.Values:
-                cls.Values[key] = cls.parse_arg_value(key, CONFIG_VALUES[key]['default'])
+            # Override config with commandline arguments
+            if args is not None and key in vars(args) and vars(args)[key] is not None:
+                setattr(self, key, self.__parse_arg_value(key, vars(args)[key]))
+            # If no command option specified use config
+            elif key in jsonvalues:
+                setattr(self, key, self.__parse_arg_value(key, jsonvalues[key]))
+            # Use default values for missing keys
+            else:
+                setattr(
+                    self,
+                    key,
+                    self.__parse_arg_value(key, CONFIG_VALUES[key]["default"]),
+                )
 
-        # Override config from commandline arguments
+        # "library" arg overrides all *_library options
+        if args is not None and args.library:
+            self.album_library = Path(args.library).expanduser().resolve()
+            self.playlist_library = Path(args.library).expanduser().resolve()
+            self.podcast_library = Path(args.library).expanduser().resolve()
 
-        for key in CONFIG_VALUES:
-            if key.lower() in vars(args) and vars(args)[key.lower()] is not None:
-                cls.Values[key] = cls.parse_arg_value(key, vars(args)[key.lower()])
+        # "output" arg overrides all output_* options
+        if args is not None and args.output:
+            self.output_album = args.output
+            self.output_podcast = args.output
+            self.output_playlist_track = args.output
+            self.output_playlist_episode = args.output
 
-        if args.no_splash:
-            cls.Values[PRINT_SPLASH] = False
-
-    @classmethod
-    def get_default_json(cls) -> Any:
-        r = {}
-        for key in CONFIG_VALUES:
-            r[key] = CONFIG_VALUES[key]['default']
-        return r
-
-    @classmethod
-    def parse_arg_value(cls, key: str, value: Any) -> Any:
-        if type(value) == CONFIG_VALUES[key]['type']:
+    @staticmethod
+    def __parse_arg_value(key: str, value: Any) -> Any:
+        config_type = CONFIG_VALUES[key]["type"]
+        if type(value) is config_type:
             return value
-        if CONFIG_VALUES[key]['type'] == str:
-            return str(value)
-        if CONFIG_VALUES[key]['type'] == int:
-            return int(value)
-        if CONFIG_VALUES[key]['type'] == bool:
-            if str(value).lower() in ['yes', 'true', '1']:
-                return True
-            if str(value).lower() in ['no', 'false', '0']:
-                return False
-            raise ValueError("Not a boolean: " + value)
-        raise ValueError("Unknown Type: " + value)
-
-    @classmethod
-    def get(cls, key: str) -> Any:
-        return cls.Values.get(key)
-
-    @classmethod
-    def get_root_path(cls) -> str:
-        if cls.get(ROOT_PATH) == '':
-            root_path = PurePath(Path.home() / 'Music/Zotify Music/')
+        elif config_type == Path:
+            return Path(value).expanduser().resolve()
+        elif config_type == AudioFormat.from_string:
+            return AudioFormat.from_string(value)
+        elif config_type == ImageSize.from_string:
+            return ImageSize.from_string(value)
+        elif config_type == Quality.from_string:
+            return Quality.from_string(value)
         else:
-            root_path = PurePath(Path(cls.get(ROOT_PATH)).expanduser())
-        Path(root_path).mkdir(parents=True, exist_ok=True)
-        return root_path
+            raise TypeError("Invalid Type: " + value)
 
-    @classmethod
-    def get_root_podcast_path(cls) -> str:
-        if cls.get(ROOT_PODCAST_PATH) == '':
-            root_podcast_path = PurePath(Path.home() / 'Music/Zotify Podcasts/')
-        else:
-            root_podcast_path = PurePath(Path(cls.get(ROOT_PODCAST_PATH)).expanduser())
-        Path(root_podcast_path).mkdir(parents=True, exist_ok=True)
-        return root_podcast_path
-
-    @classmethod
-    def get_skip_existing(cls) -> bool:
-        return cls.get(SKIP_EXISTING)
-
-    @classmethod
-    def get_skip_previously_downloaded(cls) -> bool:
-        return cls.get(SKIP_PREVIOUSLY_DOWNLOADED)
-
-    @classmethod
-    def get_split_album_discs(cls) -> bool:
-        return cls.get(SPLIT_ALBUM_DISCS)
-
-    @classmethod
-    def get_chunk_size(cls) -> int:
-        return cls.get(CHUNK_SIZE)
-
-    @classmethod
-    def get_override_auto_wait(cls) -> bool:
-        return cls.get(OVERRIDE_AUTO_WAIT)
-
-    @classmethod
-    def get_download_format(cls) -> str:
-        return cls.get(DOWNLOAD_FORMAT)
-
-    @classmethod
-    def get_download_lyrics(cls) -> bool:
-        return cls.get(DOWNLOAD_LYRICS)
-
-    @classmethod
-    def get_bulk_wait_time(cls) -> int:
-        return cls.get(BULK_WAIT_TIME)
-
-    @classmethod
-    def get_language(cls) -> str:
-        return cls.get(LANGUAGE)
-
-    @classmethod
-    def get_download_real_time(cls) -> bool:
-        return cls.get(DOWNLOAD_REAL_TIME)
-
-    @classmethod
-    def get_download_quality(cls) -> str:
-        return cls.get(DOWNLOAD_QUALITY)
-
-    @classmethod
-    def get_transcode_bitrate(cls) -> str:
-        return cls.get(TRANSCODE_BITRATE)
-
-    @classmethod
-    def get_song_archive(cls) -> str:
-        if cls.get(SONG_ARCHIVE) == '':
-            system_paths = {
-                'win32': Path.home() / 'AppData/Roaming/Zotify',
-                'linux': Path.home() / '.local/share/zotify',
-                'darwin': Path.home() / 'Library/Application Support/Zotify'
-            }
-            if sys.platform not in system_paths:
-                song_archive =  PurePath(Path.cwd() / '.zotify/.song_archive')
-            else:
-                song_archive = PurePath(system_paths[sys.platform] / '.song_archive')
-        else:
-            song_archive = PurePath(Path(cls.get(SONG_ARCHIVE)).expanduser())
-        Path(song_archive.parent).mkdir(parents=True, exist_ok=True)
-        return song_archive
-
-    @classmethod
-    def get_save_credentials(cls) -> bool:
-        return cls.get(SAVE_CREDENTIALS)
-
-    @classmethod
-    def get_credentials_location(cls) -> str:
-        if cls.get(CREDENTIALS_LOCATION) == '':
-            system_paths = {
-                'win32': Path.home() / 'AppData/Roaming/Zotify',
-                'linux': Path.home() / '.local/share/zotify',
-                'darwin': Path.home() / 'Library/Application Support/Zotify'
-            }
-            if sys.platform not in system_paths:
-                credentials_location = PurePath(Path.cwd() / '.zotify/credentials.json')
-            else:
-                credentials_location = PurePath(system_paths[sys.platform] / 'credentials.json')
-        else:
-            credentials_location = PurePath(Path.cwd()).joinpath(cls.get(CREDENTIALS_LOCATION))
-        Path(credentials_location.parent).mkdir(parents=True, exist_ok=True)
-        return credentials_location
-
-    @classmethod
-    def get_temp_download_dir(cls) -> str:
-        if cls.get(TEMP_DOWNLOAD_DIR) == '':
-            return ''
-        return PurePath(cls.get_root_path()).joinpath(cls.get(TEMP_DOWNLOAD_DIR))
-
-    @classmethod
-    def get_save_genres(cls) -> bool:
-        return cls.get(MD_SAVE_GENRES)
-    
-    @classmethod
-    def get_all_genres(cls) -> bool:
-        return cls.get(MD_ALLGENRES)
-
-    @classmethod
-    def get_all_genres_delimiter(cls) -> bool:
-        return cls.get(MD_GENREDELIMITER)
-    
-    @classmethod
-    def get_output(cls, mode: str) -> str:
-        v = cls.get(OUTPUT)
-        if v:
-            return v
-        if mode == 'playlist':
-            if cls.get_split_album_discs():
-                split = PurePath(OUTPUT_DEFAULT_PLAYLIST).parent
-                return PurePath(split).joinpath('Disc {disc_number}').joinpath(split)
-            return OUTPUT_DEFAULT_PLAYLIST
-        if mode == 'extplaylist':
-            if cls.get_split_album_discs():
-                split = PurePath(OUTPUT_DEFAULT_PLAYLIST_EXT).parent
-                return PurePath(split).joinpath('Disc {disc_number}').joinpath(split)
-            return OUTPUT_DEFAULT_PLAYLIST_EXT
-        if mode == 'liked':
-            if cls.get_split_album_discs():
-                split = PurePath(OUTPUT_DEFAULT_LIKED_SONGS).parent
-                return PurePath(split).joinpath('Disc {disc_number}').joinpath(split)
-            return OUTPUT_DEFAULT_LIKED_SONGS
-        if mode == 'single':
-            if cls.get_split_album_discs():
-                split = PurePath(OUTPUT_DEFAULT_SINGLE).parent
-                return PurePath(split).joinpath('Disc {disc_number}').joinpath(split)
-            return OUTPUT_DEFAULT_SINGLE
-        if mode == 'album':
-            if cls.get_split_album_discs():
-                split = PurePath(OUTPUT_DEFAULT_ALBUM).parent
-                return PurePath(split).joinpath('Disc {disc_number}').joinpath(split)
-            return OUTPUT_DEFAULT_ALBUM
-        raise ValueError()
-
-    @classmethod
-    def get_retry_attempts(cls) -> int:
-        return cls.get(RETRY_ATTEMPTS)
+    def get(self, key: str) -> Any:
+        """
+        Gets a value from config
+        Args:
+            key: config attribute to return value of
+        Returns:
+            Value of key
+        """
+        return getattr(self, key)

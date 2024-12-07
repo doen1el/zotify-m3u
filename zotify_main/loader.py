@@ -1,19 +1,17 @@
 # load symbol from:
 # https://stackoverflow.com/questions/22029562/python-how-to-make-simple-animated-loading-while-process-is-running
-from __future__ import annotations
 
+# imports
 from itertools import cycle
 from shutil import get_terminal_size
-from sys import platform as PLATFORM
 from threading import Thread
 from time import sleep
 
-from zotify.logger import Logger
+from zotify.termoutput import Printer
 
 
 class Loader:
-    """
-    Busy symbol.
+    """Busy symbol.
 
     Can be called inside a context:
 
@@ -21,10 +19,10 @@ class Loader:
         # do something
         pass
     """
-
-    def __init__(self, desc: str = "Loading...", end: str = "", timeout: float = 0.1):
+    def __init__(self, chan, desc="Loading...", end='', timeout=0.1, mode='prog'):
         """
         A loader-like context manager
+
         Args:
             desc (str, optional): The loader's description. Defaults to "Loading...".
             end (str, optional): Final print. Defaults to "".
@@ -33,38 +31,42 @@ class Loader:
         self.desc = desc
         self.end = end
         self.timeout = timeout
+        self.channel = chan
 
-        self.__thread = Thread(target=self.__animate, daemon=True)
-        # Cool loader looks awful in cmd
-        if PLATFORM == "win32":
-            self.steps = ["/", "-", "\\", "|"]
-        else:
-            self.steps = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]
+        self._thread = Thread(target=self._animate, daemon=True)
+        if mode == 'std1':
+            self.steps = ["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"]
+        elif mode == 'std2':
+            self.steps = ["◜","◝","◞","◟"]
+        elif mode == 'std3':
+            self.steps = ["😐 ","😐 ","😮 ","😮 ","😦 ","😦 ","😧 ","😧 ","🤯 ","💥 ","✨ ","\u3000 ","\u3000 ","\u3000 "]
+        elif mode == 'prog':
+            self.steps = ["[∙∙∙]","[●∙∙]","[∙●∙]","[∙∙●]","[∙∙∙]"]
 
         self.done = False
 
-    def start(self) -> Loader:
-        self.__thread.start()
+    def start(self):
+        self._thread.start()
         return self
 
-    def __animate(self) -> None:
+    def _animate(self):
         for c in cycle(self.steps):
             if self.done:
                 break
-            Logger.print_loader(f"\r {c} {self.desc} ")
+            Printer.print_loader(self.channel, f"\r\t{c} {self.desc} ")
             sleep(self.timeout)
 
-    def __enter__(self) -> None:
+    def __enter__(self):
         self.start()
 
-    def stop(self) -> None:
+    def stop(self):
         self.done = True
         cols = get_terminal_size((80, 20)).columns
-        Logger.print_loader("\r" + " " * cols)
+        Printer.print_loader(self.channel, "\r" + " " * cols)
 
         if self.end != "":
-            Logger.print_loader(f"\r{self.end}")
+            Printer.print_loader(self.channel, f"\r{self.end}")
 
-    def __exit__(self, exc_type, exc_value, tb) -> None:
+    def __exit__(self, exc_type, exc_value, tb):
         # handle exceptions with those variables ^
         self.stop()
