@@ -7,15 +7,10 @@ import time
 load_dotenv()
 
 def download_playlist(url):
-    print("Environment variables:")
-    print("SONG_ARCHIVE:", os.getenv("SONG_ARCHIVE"))
-    print("ROOT_PATH:", os.getenv("ROOT_PATH"))
-    print("DOWNLOAD_FORMAT:", os.getenv("DOWNLOAD_FORMAT"))
-    print("DOWNLOAD_QUALITY:", os.getenv("DOWNLOAD_QUALITY"))
-    print("PLAYLISTS:", os.getenv("PLAYLISTS"))
+    print(f"Downloading playlist: {url}")
     
     # zotify command (username, password, song archive path, root path, download format, download quality, print downloads, download lyrics, url)
-    command = ["zotify", url, "--archive", os.getenv("SONG_ARCHIVE"), "--library", os.getenv("ROOT_PATH"), "--audio-format", os.getenv("DOWNLOAD_FORMAT"), "--download-quality", os.getenv("DOWNLOAD_QUALITY"), "--skip-previous"]
+    command = ["zotify", "--credentials-locatio", os.getenv("CREDENTIAL_LOCATION"),  "--song-archive", os.getenv("SONG_ARCHIVE"), "--root-path", os.getenv("ROOT_PATH"), "--download-format", os.getenv("DOWNLOAD_FORMAT"), "--download-quality", os.getenv("DOWNLOAD_QUALITY"), "--skip-existing", "True", "--skip-previously-downloaded", "True", url]
 
     # start the subprocess
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -64,34 +59,45 @@ def download_and_create_playlists():
     print(f"Running script at {datetime.now()}")
     # loop through each playlist string and download the playlist
     for playlist in os.getenv("PLAYLISTS").split(', '):
-        print(playlist)
         download_playlist(playlist)
         
     # create playlists in the music folder
     create_playlists(os.getenv("ROOT_PATH"))
     
-def loginToSpotify():
-    # zotify login (username, password)
-    print(os.getenv("CREDENTIAL_LOCATION"))
-    command = ["zotify", "--credentials", os.getenv("CREDENTIAL_LOCATION"), "-p"]
+# def loginToSpotify():
+#     # zotify login (username, password)
+#     print(os.getenv("CREDENTIAL_LOCATION"))
+#     command = ["zotify", "--credentials", os.getenv("CREDENTIAL_LOCATION"), "-p"]
 
-    # start the subprocess
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+#     # start the subprocess
+#     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # wait until the process is finished and fetch the output
-    stdout, stderr = process.communicate()
+#     # wait until the process is finished and fetch the output
+#     stdout, stderr = process.communicate()
     
-    print("OUTPUT: ", stdout)
-    print("ERROR: ", stderr)
+#     print("OUTPUT: ", stdout)
+#     print("ERROR: ", stderr)
 
-    # check if the subprocess was successfull
-    if process.returncode != 0:
-        print(f"Error while logging in: {stderr.decode()}")
-    else:
-        print(f"Logged in successfuly: {stdout.decode()}")
+#     # check if the subprocess was successfull
+#     if process.returncode != 0:
+#         print(f"Error while logging in: {stderr.decode()}")
+#     else:
+#         print(f"Logged in successfuly: {stdout.decode()}")
     
 
 if __name__ == "__main__":
+    print("Environment variables:")
+    print("SONG_ARCHIVE:", os.getenv("SONG_ARCHIVE"))
+    print("ROOT_PATH:", os.getenv("ROOT_PATH"))
+    print("DOWNLOAD_FORMAT:", os.getenv("DOWNLOAD_FORMAT"))
+    print("DOWNLOAD_QUALITY:", os.getenv("DOWNLOAD_QUALITY"))
+    print("PLAYLISTS:", os.getenv("PLAYLISTS"))
+    credential_location = os.getenv("CREDENTIAL_LOCATION")
+    if not credential_location or not os.path.exists(credential_location):
+        print(f"Credential file not found: {credential_location}")
+    else:
+        print(f"Credential file found: {credential_location}")
+    print("-----------------------------")
     # print("Starting the zotify login script")
     # loginToSpotify()
     # print("Waiting for 60 seconds")
