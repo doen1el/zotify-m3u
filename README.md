@@ -21,19 +21,18 @@ Edit the `docker-compose.yml` file and replace the environment variables with yo
 
 ```
 services:
-  spotify-downloader:
+  zotify-m3u:
     image: zotify-m3u
+    container_name: zotify-m3u
     volumes:
-      - "./credentials:/app/credentials"
-      - "./mnt/user/music:/mnt/user/music" # <-- change this mapping for your music library directory
-    restart: unless-stopped
+      - "/your/download/path:/app/downloads" # <-- change this mapping for your music library directory
     environment:
-      - CREDENTIAL_LOCATION=/app/credentials.json # where the credentials are stored
-      - SONG_ARCHIVE=/mnt/user/music/music_archive # where the list of downloaded songs is stored
-      - ROOT_PATH=/mnt/user/music # where the downloaded songs are stored
-      - DOWNLOAD_FORMAT=mp3 # format of the downloaded songs
-      - DOWNLOAD_QUALITY=very_high # quality of the downloaded songs
-      - PLAYLISTS= playlist_url_1, playlist_url_2, ... # list of playlists to download
+      - CREDENTIAL_LOCATION=/app/credentials.json
+      - SONG_ARCHIVE=/app/downloads/music_archive
+      - ROOT_PATH=/app/downloads
+      - DOWNLOAD_FORMAT=mp3
+      - DOWNLOAD_QUALITY=very_high
+      - PLAYLISTS=playlist_url_1, playlist_url_2, ...
 ```
 
 | Environment Variable | Description                                                        |
