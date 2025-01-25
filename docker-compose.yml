@@ -1,0 +1,13 @@
+services:
+  zotify-m3u:
+    image: zotify-m3u
+    container_name: zotify-m3u
+    volumes:
+      - "/your/download/path:/app/downloads" # <-- change this mapping for your music library directory
+    environment:
+      - CREDENTIAL_LOCATION=/app/credentials.json
+      - SONG_ARCHIVE=/app/downloads/music_archive
+      - ROOT_PATH=/app/downloads
+      - DOWNLOAD_FORMAT=mp3
+      - DOWNLOAD_QUALITY=very_high
+      - PLAYLISTS=playlist_url_1, playlist_url_2, ...

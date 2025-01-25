@@ -1,24 +1,28 @@
-FROM python:3.11.11-alpine3.20
+FROM python:3.11-slim
 
-COPY ./credentials.json /app/credentials.json
-COPY ./main.py /app
-COPY ./requirements.txt /requirements.txt
-COPY ./zotify-main /zotify-main
+WORKDIR /app
+
+# Install ffmpeg, nano and git
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg nano git && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install pipx
 RUN python3 -m pip install --user pipx
 ENV PATH="/root/.local/bin:${PATH}"
 
-# Install git
-RUN apk add --no-cache ffmpeg git
+# Copy the files
+COPY ./main.py ./
+COPY ./zotify ./zotify
+COPY ./requirements.txt ./
 
-# Install dependencies
-RUN pip install --no-cache-dir -r /requirements.txt
+# Install the requirements and the zotify package
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pipx install ./zotify
 
-# Install zotify
-# RUN pipx install git+https://github.com/zotify-dev/zotify.git
-RUN pipx install zotify-main/
+# Create the credentials.json file and the downloads folder
+RUN touch ./credentials.json
+RUN mkdir ./downloads
 
-WORKDIR /app
-
-CMD ["python3", "main.py"]
+CMD ["tail", "-f", "/dev/null"]

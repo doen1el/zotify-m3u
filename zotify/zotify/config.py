@@ -55,7 +55,7 @@ CONFIG_VALUES = {
     SKIP_EXISTING:              { 'default': 'True',  'type': bool, 'arg': '--skip-existing'              },
     SKIP_PREVIOUSLY_DOWNLOADED: { 'default': 'False', 'type': bool, 'arg': '--skip-previously-downloaded' },
     RETRY_ATTEMPTS:             { 'default': '1',     'type': int,  'arg': '--retry-attempts'             },
-    BULK_WAIT_TIME:             { 'default': '5',     'type': int,  'arg': '--bulk-wait-time'             },
+    BULK_WAIT_TIME:             { 'default': '1',     'type': int,  'arg': '--bulk-wait-time'             },
     OVERRIDE_AUTO_WAIT:         { 'default': 'False', 'type': bool, 'arg': '--override-auto-wait'         },
     CHUNK_SIZE:                 { 'default': '20000', 'type': int,  'arg': '--chunk-size'                 },
     DOWNLOAD_REAL_TIME:         { 'default': 'False', 'type': bool, 'arg': '--download-real-time'         },
